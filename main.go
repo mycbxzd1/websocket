@@ -146,8 +146,8 @@ func main() {
 	go handleBroadcast()
 
 	// 启动 HTTP 服务器并检查是否有错误
-	addr := "localhost:15542"
-	fmt.Println("Server started on " + addr)
+	addr := ":15542"
+	fmt.Println("Server started on docker" + addr)
 	err := http.ListenAndServe(addr, nil)
 	if err != nil {
 		log.Fatal("Server failed to start: ", err)

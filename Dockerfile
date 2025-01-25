@@ -26,7 +26,7 @@ WORKDIR /root/
 COPY --from=builder /go/src/app/my-go-project .
 
 # 暴露服务所需的端口
-EXPOSE 8080
+EXPOSE 15542
 
 # 启动二进制文件
 CMD ["./my-go-project"]
