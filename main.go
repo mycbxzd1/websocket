@@ -1,24 +1,26 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"github.com/gorilla/websocket"
-	"encoding/json"
 	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 var clients = make(map[*websocket.Conn]bool) // 当前连接的客户端
-var broadcast = make(chan string)             // 用于广播消息的通道
-var mutex = &sync.Mutex{}                     // 确保线程安全
+var broadcast = make(chan string)            // 用于广播消息的通道
+var mutex = &sync.Mutex{}                    // 确保线程安全
 
 // 颜色控制
 const (
-	reset   = "\033[0m"
-	green   = "\033[32m"
-	red     = "\033[31m"
-	yellow  = "\033[33m"
+	reset  = "\033[0m"
+	green  = "\033[32m"
+	red    = "\033[31m"
+	yellow = "\033[33m"
 )
 
 // 处理 WebSocket 连接
@@ -43,6 +45,9 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 
 	log.Println(green, "New WebSocket connection established", reset)
+
+	// 启动一个 goroutine 进行心跳
+	go handlePing(ws)
 
 	// 一直监听该 WebSocket 连接上的消息
 	for {
@@ -103,7 +108,34 @@ func handleBroadcast() {
 	}
 }
 
+// 处理根路径请求
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	// 设置返回内容类型为 HTML
+	w.Header().Set("Content-Type", "text/html")
+	// 返回简单的 HTML 内容
+	fmt.Fprintln(w, "<h1>系统正常运行</h1>")
+}
+
+// 心跳机制，防止连接被中断
+func handlePing(ws *websocket.Conn) {
+	ticker := time.NewTicker(30 * time.Second) // 每 30 秒发送一次 Ping
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Println(red, "Ping failed:", err, reset)
+				return
+			}
+		}
+	}
+}
+
 func main() {
+	// 设置根路径路由，返回 HTML 信息
+	http.HandleFunc("/", handleRoot)
+
 	// 设置 WebSocket 路由
 	http.HandleFunc("/ws", handleConnections)
 
@@ -113,8 +145,11 @@ func main() {
 	// 启动广播处理
 	go handleBroadcast()
 
-	// 启动 HTTP 服务器
-	addr := "localhost:8080"
+	// 启动 HTTP 服务器并检查是否有错误
+	addr := "localhost:15542"
 	fmt.Println("Server started on " + addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	err := http.ListenAndServe(addr, nil)
+	if err != nil {
+		log.Fatal("Server failed to start: ", err)
+	}
 }
