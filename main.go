@@ -11,7 +11,7 @@ import (
 )
 
 var clients = make(map[*websocket.Conn]bool)
-var broadcast = make(chan string)
+var broadcast = make(chan map[string]string)
 var mutex = &sync.Mutex{}
 
 const (
@@ -27,6 +27,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type Message struct {
+	Content string `json:"content"`
+	Type    string `json:"type"`
+}
+
 func handleConnections(w http.ResponseWriter, r *http.Request) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -40,11 +45,11 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	mutex.Unlock()
 
 	log.Println(green, "New WebSocket connection established", reset)
-
 	go handlePing(ws)
 
 	for {
-		_, _, err := ws.ReadMessage()
+		var msg Message
+		err := ws.ReadJSON(&msg)
 		if err != nil {
 			log.Println(red, "WebSocket read error:", err, reset)
 			mutex.Lock()
@@ -52,38 +57,36 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			mutex.Unlock()
 			break
 		}
+		broadcast <- map[string]string{"content": msg.Content, "type": msg.Type}
 	}
 }
 
 func handlePost(w http.ResponseWriter, r *http.Request) {
-	var msg map[string]interface{}
+	var msg Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		log.Println(red, "Invalid POST request:", err, reset)
 		return
 	}
 
-	message, ok := msg["message"].(string)
-	if !ok || message == "" {
-		http.Error(w, "Message is required", http.StatusBadRequest)
-		log.Println(red, "Message is required in POST", reset)
-		return
-	}
-
-	log.Println(yellow, "Received POST request with message:", message, reset)
-	broadcast <- message
+	log.Println(yellow, "Received POST request with message:", msg, reset)
+	broadcast <- map[string]string{"content": msg.Content, "type": msg.Type}
 	w.WriteHeader(http.StatusOK)
 }
 
 func handleBroadcast() {
 	for {
 		message := <-broadcast
+		msgJSON, err := json.Marshal(message)
+		if err != nil {
+			log.Println(red, "Error marshalling message:", err, reset)
+			continue
+		}
 
-		log.Println(green, "Broadcasting message:", message, reset)
-
+		log.Println(green, "Broadcasting message:", string(msgJSON), reset)
 		mutex.Lock()
 		for client := range clients {
-			if err := client.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
+			if err := client.WriteMessage(websocket.TextMessage, msgJSON); err != nil {
 				log.Println(red, "Error broadcasting message:", err, reset)
 				client.Close()
 				delete(clients, client)
@@ -117,13 +120,11 @@ func main() {
 	http.HandleFunc("/", handleRoot)
 	http.HandleFunc("/ws", handleConnections)
 	http.HandleFunc("/post", handlePost)
-
 	go handleBroadcast()
 
 	addr := ":15542"
 	log.Println(green, "Server started on", addr, reset)
-	err := http.ListenAndServe(addr, nil)
-	if err != nil {
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal(red, "Server failed to start:", err, reset)
 	}
 }
